@@ -1,13 +1,16 @@
 """计划服务"""
+import uuid
 from datetime import datetime, timedelta
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.plan import StudyPlan, PlanPhase, DailyTask
 from app.models.user import User
+from app.models.subscription import Subscription
 from app.schemas.plan import PlanResponse, TaskResponse, PlanPhaseResponse
 from app.services.badge_engine import BadgeEngine
 from app.core.logging import get_logger
+from app.config import settings
 
 logger = get_logger("service.plan")
 
@@ -18,6 +21,117 @@ class PlanService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.badge_engine = BadgeEngine(db)
+    
+    async def create_plan_from_ai(
+        self,
+        user_id: str,
+        plan_data: Dict[str, Any]
+    ) -> StudyPlan:
+        """
+        从 AI 生成的数据创建学习计划
+        
+        Args:
+            user_id: 用户 ID
+            plan_data: AI 返回的计划数据
+        
+        Returns:
+            创建的学习计划
+        """
+        logger.info(f"为用户创建学习计划: user_id={user_id}")
+        
+        # 创建计划
+        plan = StudyPlan(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            title=plan_data.get("title", "学习计划"),
+            description=plan_data.get("target", ""),
+            status="active",
+            goals=plan_data.get("goals", {}),
+            habits=plan_data.get("habits", {}),
+            knowledge_level=plan_data.get("knowledge_level", "入门"),
+            start_date=datetime.utcnow(),
+            end_date=datetime.utcnow() + timedelta(days=plan_data.get("total_days", 30))
+        )
+        
+        self.db.add(plan)
+        
+        # 创建阶段
+        phases_data = plan_data.get("phases", [])
+        for i, phase_data in enumerate(phases_data):
+            phase = PlanPhase(
+                id=str(uuid.uuid4()),
+                plan_id=plan.id,
+                name=phase_data.get("name", f"阶段{i+1}"),
+                description=phase_data.get("description", ""),
+                order=i,
+                duration_days=phase_data.get("duration_days", 7),
+                goals=phase_data.get("goals", [])
+            )
+            self.db.add(phase)
+            
+            # 为该阶段创建每日任务
+            await self._create_phase_tasks(
+                plan_id=plan.id,
+                phase_id=phase.id,
+                phase_data=phase_data,
+                start_date=plan.start_date
+            )
+        
+        await self.db.commit()
+        await self.db.refresh(plan)
+        
+        logger.info(f"学习计划创建成功: plan_id={plan.id}")
+        return plan
+    
+    async def _create_phase_tasks(
+        self,
+        plan_id: str,
+        phase_id: str,
+        phase_data: Dict[str, Any],
+        start_date: datetime
+    ):
+        """为阶段创建每日任务"""
+        duration_days = phase_data.get("duration_days", 7)
+        daily_tasks_avg = phase_data.get("daily_tasks_avg", 2)
+        
+        # 计算开始日期（基于阶段顺序）
+        # 简化：直接从 start_date 开始
+        phase_start = start_date
+        
+        for day in range(duration_days):
+            scheduled_date = phase_start + timedelta(days=day)
+            
+            # 每天创建 1-3 个任务
+            tasks_count = min(daily_tasks_avg, 3)
+            
+            for task_num in range(tasks_count):
+                task = DailyTask(
+                    id=str(uuid.uuid4()),
+                    plan_id=plan_id,
+                    phase_id=phase_id,
+                    title=self._generate_task_title(phase_data.get("name", ""), day, task_num),
+                    content=self._generate_task_content(phase_data.get("goals", []), task_num),
+                    duration_mins=30,  # 默认30分钟
+                    difficulty="medium",
+                    status="pending",
+                    scheduled_date=scheduled_date,
+                    score=10  # 每个任务10积分
+                )
+                self.db.add(task)
+    
+    def _generate_task_title(self, phase_name: str, day: int, task_num: int) -> str:
+        """生成任务标题"""
+        topics = ["学习新知识点", "实践练习", "复习巩固", "完成小测验", "总结笔记"]
+        topic = topics[task_num % len(topics)]
+        return f"第{day+1}天 - {topic}"
+    
+    def _generate_task_content(self, goals: List[str], task_num: int) -> str:
+        """生成任务内容"""
+        if not goals:
+            return "完成当日学习任务"
+        
+        goal = goals[task_num % len(goals)] if goals else "完成学习目标"
+        return f"深入学习：{goal}"
     
     async def get_current_plan(self, user_id: str) -> Optional[dict]:
         """获取当前学习计划"""
@@ -35,11 +149,17 @@ class PlanService:
         if not plan:
             return None
         
+        # 获取阶段信息
+        phases_stmt = (
+            select(PlanPhase)
+            .where(PlanPhase.plan_id == plan.id)
+            .order_by(PlanPhase.order)
+        )
+        phases_result = await self.db.execute(phases_stmt)
+        phases = phases_result.scalars().all()
+        
         # 计算完成率
         completion_rate = await self._calculate_completion_rate(plan.id)
-        
-        # 获取阶段信息
-        phases = await self._get_plan_phases(plan.id)
         
         return {
             "id": plan.id,
@@ -51,7 +171,17 @@ class PlanService:
             "knowledge_level": plan.knowledge_level,
             "start_date": plan.start_date,
             "end_date": plan.end_date,
-            "phases": phases,
+            "phases": [
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "description": p.description,
+                    "order": p.order,
+                    "duration_days": p.duration_days,
+                    "goals": p.goals
+                }
+                for p in phases
+            ],
             "completion_rate": completion_rate
         }
     
@@ -74,60 +204,6 @@ class PlanService:
         completed = completed_result.scalar() or 0
         
         return round(completed / total, 2)
-    
-    async def _get_plan_phases(self, plan_id: str) -> List[dict]:
-        """获取计划阶段"""
-        stmt = (
-            select(PlanPhase)
-            .where(PlanPhase.plan_id == plan_id)
-            .order_by(PlanPhase.order)
-        )
-        result = await self.db.execute(stmt)
-        phases = result.scalars().all()
-        
-        return [
-            {
-                "id": p.id,
-                "name": p.name,
-                "description": p.description,
-                "order": p.order,
-                "duration_days": p.duration_days,
-                "goals": p.goals
-            }
-            for p in phases
-        ]
-    
-    async def generate_plan_from_session(self, user_id: str) -> dict:
-        """
-        基于会话历史生成学习计划
-        
-        TODO: 调用 AI Agent 生成计划
-        """
-        logger.info(f"为用户生成学习计划: {user_id}")
-        
-        # TODO: 从会话历史提取信息
-        # TODO: 调用 Plan Agent 生成计划
-        
-        # 返回示例计划（开发阶段）
-        return {
-            "id": "example-plan-id",
-            "title": "Python 入门学习计划",
-            "description": "零基础学习 Python 编程",
-            "status": "active",
-            "phases": [
-                {
-                    "name": "第一阶段：基础语法",
-                    "duration_days": 14,
-                    "tasks": 20
-                },
-                {
-                    "name": "第二阶段：函数和模块",
-                    "duration_days": 14,
-                    "tasks": 18
-                }
-            ],
-            "daily_tasks": 3
-        }
     
     async def get_today_tasks(self, user_id: str) -> List[dict]:
         """获取今日任务"""
@@ -156,6 +232,7 @@ class PlanService:
                 "duration_mins": t.duration_mins,
                 "difficulty": t.difficulty,
                 "status": t.status,
+                "scheduled_date": t.scheduled_date.isoformat() if t.scheduled_date else None,
                 "score": t.score
             }
             for t in tasks
@@ -188,13 +265,17 @@ class PlanService:
                 "duration_mins": t.duration_mins,
                 "difficulty": t.difficulty,
                 "status": t.status,
-                "scheduled_date": t.scheduled_date,
+                "scheduled_date": t.scheduled_date.isoformat() if t.scheduled_date else None,
                 "score": t.score
             }
             for t in tasks
         ]
     
-    async def complete_task(self, task_id: str) -> dict:
+    async def complete_task(
+        self,
+        task_id: str,
+        user_id: str
+    ) -> dict:
         """
         完成任务
         
@@ -214,19 +295,20 @@ class PlanService:
         if task.status == "completed":
             raise ValueError("任务已完成")
         
+        # 获取计划
+        plan_stmt = select(StudyPlan).where(StudyPlan.id == task.plan_id)
+        plan_result = await self.db.execute(plan_stmt)
+        plan = plan_result.scalar_one_or_none()
+        
+        if not plan or plan.user_id != user_id:
+            raise ValueError("无权限操作此任务")
+        
         # 更新任务状态
         task.status = "completed"
         task.completed_at = datetime.utcnow()
         
         # 获取用户
-        plan_stmt = select(StudyPlan).where(StudyPlan.id == task.plan_id)
-        plan_result = await self.db.execute(plan_stmt)
-        plan = plan_result.scalar_one_or_none()
-        
-        if not plan:
-            raise ValueError("计划不存在")
-        
-        user_stmt = select(User).where(User.id == plan.user_id)
+        user_stmt = select(User).where(User.id == user_id)
         user_result = await self.db.execute(user_stmt)
         user = user_result.scalar_one_or_none()
         
@@ -241,7 +323,7 @@ class PlanService:
         level_up = self.badge_engine.check_level_up(user)
         
         # 检查徽章
-        new_badges = await self.badge_engine.check_and_award_badges(user.id)
+        new_badges = await self.badge_engine.check_and_award_badges(user_id)
         
         await self.db.commit()
         
@@ -252,8 +334,31 @@ class PlanService:
         )
         
         return {
-            "score": task.score,
+            "task_id": task_id,
+            "score_earned": task.score,
             "new_total_score": user.total_score,
             "level_up": level_up,
             "new_badges": new_badges
         }
+    
+    async def skip_task(self, task_id: str, user_id: str) -> bool:
+        """跳过任务"""
+        stmt = select(DailyTask).where(DailyTask.id == task_id)
+        result = await self.db.execute(stmt)
+        task = result.scalar_one_or_none()
+        
+        if not task:
+            return False
+        
+        # 检查权限
+        plan_stmt = select(StudyPlan).where(StudyPlan.id == task.plan_id)
+        plan_result = await self.db.execute(plan_stmt)
+        plan = plan_result.scalar_one_or_none()
+        
+        if not plan or plan.user_id != user_id:
+            return False
+        
+        task.status = "skip"
+        await self.db.commit()
+        
+        return True

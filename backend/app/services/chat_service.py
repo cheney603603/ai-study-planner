@@ -49,8 +49,8 @@ class ChatService:
             timestamp=datetime.utcnow()
         )
         
-        # 从会话中获取上下文（用于 Agent）
-        session_context = self._get_session_context(session)
+        # 从会话中获取上下文
+        session_context = {}
         
         # 调用 Agent 处理
         agent_response = await self.agent_router.route(
@@ -68,9 +68,6 @@ class ChatService:
             content=agent_response["content"],
             timestamp=datetime.utcnow()
         )
-        
-        # 更新会话上下文
-        new_context = agent_response.get("metadata", {})
         
         # 更新会话消息历史
         messages = session.messages or []
@@ -97,15 +94,9 @@ class ChatService:
         return {
             "session_id": session.id,
             "message": ai_message,
-            "token_used": agent_response.get("token_used", 0)
+            "token_used": agent_response.get("token_used", 0),
+            "metadata": agent_response.get("metadata", {})
         }
-    
-    def _get_session_context(self, session: ChatSession) -> dict:
-        """从会话中提取 Agent 需要的上下文"""
-        if not hasattr(session, '_context_cache'):
-            return {}
-        
-        return getattr(session, '_context_cache', {})
     
     async def _get_or_create_session(
         self,
@@ -154,8 +145,8 @@ class ChatService:
                 "session_type": s.session_type,
                 "status": s.status,
                 "message_count": len(s.messages or []),
-                "created_at": s.created_at,
-                "updated_at": s.updated_at
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+                "updated_at": s.updated_at.isoformat() if s.updated_at else None
             }
             for s in sessions
         ]

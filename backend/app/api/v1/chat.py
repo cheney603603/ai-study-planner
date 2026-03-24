@@ -8,6 +8,7 @@ from app.schemas.chat import (
 )
 from app.schemas.common import DataResponse
 from app.services.chat_service import ChatService
+from app.services.plan_service import PlanService
 from app.services.token_manager import TokenManager
 from app.dependencies import get_current_user_id
 from app.core.logging import get_logger
@@ -40,10 +41,10 @@ async def send_message(
             detail="Token 配额不足，请升级会员"
         )
     
-    service = ChatService(db)
+    chat_service = ChatService(db)
     
     try:
-        result = await service.process_message(
+        result = await chat_service.process_message(
             user_id=user_id,
             content=request.content,
             session_id=request.session_id,
@@ -58,17 +59,26 @@ async def send_message(
             except TokenQuotaExceededError:
                 logger.warning(f"Token 配额不足: user={user_id}")
         
+        # 检查是否触发生成计划
+        metadata = result.get("metadata", {})
+        
+        response_data = {
+            "session_id": result["session_id"],
+            "message": {
+                "role": "assistant",
+                "content": result["message"].content
+            },
+            "token_used": token_used
+        }
+        
+        # 如果 AI 准备好了计划，询问用户是否确认
+        if metadata.get("ready_to_save"):
+            response_data["plan_ready"] = True
+            response_data["plan_data"] = metadata.get("plan")
+        
         return DataResponse(
             code="success",
-            data={
-                "session_id": result["session_id"],
-                "message": {
-                    "role": "assistant",
-                    "content": result["message"].content,
-                    "timestamp": result["message"].timestamp.isoformat() if hasattr(result["message"], 'timestamp') else None
-                },
-                "token_used": token_used
-            }
+            data=response_data
         )
     except TokenQuotaExceededError:
         raise HTTPException(
@@ -78,6 +88,38 @@ async def send_message(
     except Exception as e:
         logger.error(f"处理消息失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"处理消息失败: {str(e)}")
+
+
+@router.post("/confirm-plan", response_model=DataResponse)
+async def confirm_and_create_plan(
+    plan_data: dict,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    确认并创建学习计划
+    
+    当用户确认 AI 生成的计划时调用此接口
+    """
+    logger.info(f"用户 {user_id} 确认创建学习计划")
+    
+    plan_service = PlanService(db)
+    
+    try:
+        plan = await plan_service.create_plan_from_ai(user_id, plan_data)
+        
+        return DataResponse(
+            code="success",
+            message="学习计划创建成功！",
+            data={
+                "plan_id": plan.id,
+                "title": plan.title,
+                "start_date": plan.start_date.isoformat() if plan.start_date else None
+            }
+        )
+    except Exception as e:
+        logger.error(f"创建计划失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/sessions", response_model=DataResponse)
