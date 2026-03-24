@@ -2,6 +2,21 @@
 from typing import Dict, Any
 from app.agents.base import BaseAgent
 
+# 系统提示词
+SYSTEM_PROMPT = """你是一位温暖的学习导师，擅长鼓励学习者、给出反馈和建议。
+
+你的职责：
+1. 对用户完成的任务给予真诚的鼓励和肯定
+2. 分析学习情况，给出适当的建议
+3. 帮助用户保持学习动力
+
+回复要求：
+- 保持温暖、鼓励的语气
+- 简短有力，不要太长
+- 适时给予小技巧或建议
+- 用中文回复
+"""
+
 
 class FeedbackAgent(BaseAgent):
     """评估反馈 Agent - 分析完成情况，提供鼓励和建议"""
@@ -23,75 +38,63 @@ class FeedbackAgent(BaseAgent):
         message = context.get("message", "")
         task_result = context.get("task_result", {})
         streak_info = context.get("streak_info", {})
+        history = context.get("history", [])
         
-        # 分析反馈类型
-        feedback_type = self._classify_feedback(message)
+        # 构建上下文
+        streak = streak_info.get("current_streak", 0)
+        score = task_result.get("score", 0)
+        total_score = task_result.get("total_score", 0)
+        level = task_result.get("level", "入门")
         
-        # 生成响应
-        response = self._generate_feedback(feedback_type, task_result, streak_info)
+        # 构建历史摘要
+        history_summary = ""
+        if history:
+            recent = history[-3:]
+            for h in recent:
+                role = "你" if h.get("role") == "user" else "我"
+                history_summary += f"{role}: {h.get('content', '')[:50]}...\n"
         
-        self.log("info", f"反馈生成: type={feedback_type}")
+        # 构建提示词
+        prompt = f"""学习情况摘要：
+- 当前连续学习：{streak} 天
+- 本次获得积分：+{score}
+- 总积分：{total_score}
+- 当前等级：{level}
+
+最近的对话：
+{history_summary}
+
+用户说：{message}
+
+请给予温暖的鼓励和适当的建议。简短有力，30-50字左右。"""
+        
+        # 调用 LLM
+        llm_result = await self._call_llm(
+            prompt=prompt,
+            system_prompt=SYSTEM_PROMPT,
+            temperature=0.9
+        )
+        
+        response = llm_result.get("response", "")
+        token_used = llm_result.get("token_used", 0)
+        
+        # 添加额外的激励信息
+        extra_info = ""
+        if streak >= 7:
+            extra_info = "\n\n🔥 连续学习 7 天了！继续保持！"
+        elif streak >= 3:
+            extra_info = "\n\n💪 学习习惯正在养成！"
+        
+        response += extra_info
+        
+        self.log("info", f"反馈生成: streak={streak}, score={score}")
         
         return {
             "response": response,
-            "token_used": 80,
+            "token_used": token_used,
             "metadata": {
-                "feedback_type": feedback_type,
-                "encouragement_level": "high"
+                "encouragement_level": "high" if streak >= 7 else "normal",
+                "streak": streak,
+                "score": score
             }
         }
-    
-    def _classify_feedback(self, message: str) -> str:
-        """分类反馈"""
-        positive_keywords = ["完成", "学会了", "懂了", "掌握了", "好"]
-        negative_keywords = ["不懂", "难", "不会", "困惑", "卡住了"]
-        neutral_keywords = ["继续", "下一步", "下一个"]
-        
-        for kw in positive_keywords:
-            if kw in message:
-                return "positive"
-        for kw in negative_keywords:
-            if kw in message:
-                return "negative"
-        return "neutral"
-    
-    def _generate_feedback(
-        self,
-        feedback_type: str,
-        task_result: dict,
-        streak_info: dict
-    ) -> str:
-        """生成反馈"""
-        responses = {
-            "positive": (
-                "🎉 太棒了！你已经完成了今天的任务！\n\n"
-                "继续保持这个节奏，你一定能达成目标！\n\n"
-                "📈 当前连续学习：{streak} 天\n"
-                "💎 获得积分：+{score}\n\n"
-                "继续加油，明天见！"
-            ),
-            "negative": (
-                "🤔 学习过程中遇到困难是很正常的！\n\n"
-                "不要气馁，可以试试：\n"
-                "1. 回顾一下之前的知识点\n"
-                "2. 把问题分解成小块\n"
-                "3. 搜索相关资料\n\n"
-                "需要我帮你解释一下吗？"
-            ),
-            "neutral": (
-                "📖 好的，让我们继续！\n\n"
-                "今日任务：\n"
-                "1. 复习昨天的内容\n"
-                "2. 学习新知识点\n"
-                "3. 完成练习题\n\n"
-                "开始吧！"
-            )
-        }
-        
-        response = responses.get(feedback_type, responses["neutral"])
-        
-        # 填充数据
-        streak = streak_info.get("current_streak", 1)
-        score = task_result.get("score", 10)
-        
-        return response.format(streak=streak, score=score)

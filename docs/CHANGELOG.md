@@ -1,5 +1,21 @@
 # 变更日志
 
+## [0.2.0-alpha] - 2026-03-24
+
+### 新增
+- DashScope API 集成
+- DashScope 客户端实现
+- AI Agent 接入 DashScope
+- Goal Agent 完整实现
+- Plan Agent 完整实现
+- Feedback Agent 完整实现
+
+### 配置
+- `.env` 文件配置 DashScope API Key
+- 支持 qwen3.5-flash 模型
+
+---
+
 ## [0.1.0-alpha] - 2026-03-24
 
 ### 初始化
@@ -20,7 +36,7 @@
 - 徽章引擎
 
 ### 待完成
-- AI Agent 实际对接 DashScope
-- 前端开发
-- 支付集成
-- 视频/图文内容
+- [x] AI Agent 实际对接 DashScope ✅
+- [ ] 前端开发
+- [ ] 支付集成
+- [ ] 视频/图文内容

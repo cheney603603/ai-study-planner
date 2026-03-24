@@ -25,7 +25,8 @@ class Settings(BaseSettings):
     
     # DashScope
     DASHSCOPE_API_KEY: Optional[str] = None
-    DASHSCOPE_BASE_URL: str = "https://dashscope.aliyuncs.com"
+    DASHSCOPE_BASE_URL: str = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
+    DASHSCOPE_MODEL: str = "qwen3.5-flash"
     
     # 阿里云 OSS
     ALIYUN_ACCESS_KEY_ID: Optional[str] = None

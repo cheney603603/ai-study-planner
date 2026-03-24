@@ -32,7 +32,7 @@ class ChatService:
         
         1. 获取或创建会话
         2. 调用 Agent 处理
-        3. 保存消息历史
+        3. 保存消息历史和上下文
         4. 返回响应
         """
         # 获取或创建会话
@@ -49,12 +49,17 @@ class ChatService:
             timestamp=datetime.utcnow()
         )
         
+        # 从会话中获取上下文（用于 Agent）
+        session_context = self._get_session_context(session)
+        
         # 调用 Agent 处理
         agent_response = await self.agent_router.route(
             user_id=user_id,
             message=content,
             session_id=session.id,
-            session_type=session_type
+            session_type=session_type,
+            context=session_context,
+            history=session.messages or []
         )
         
         # AI 响应消息
@@ -64,10 +69,13 @@ class ChatService:
             timestamp=datetime.utcnow()
         )
         
+        # 更新会话上下文
+        new_context = agent_response.get("metadata", {})
+        
         # 更新会话消息历史
         messages = session.messages or []
-        messages.append(user_message.model_dump(mode="json"))
-        messages.append(ai_message.model_dump(mode="json"))
+        messages.append(user_message.model_dump(mode="json", exclude_none=True))
+        messages.append(ai_message.model_dump(mode="json", exclude_none=True))
         
         # 保存到数据库
         stmt = (
@@ -91,6 +99,13 @@ class ChatService:
             "message": ai_message,
             "token_used": agent_response.get("token_used", 0)
         }
+    
+    def _get_session_context(self, session: ChatSession) -> dict:
+        """从会话中提取 Agent 需要的上下文"""
+        if not hasattr(session, '_context_cache'):
+            return {}
+        
+        return getattr(session, '_context_cache', {})
     
     async def _get_or_create_session(
         self,

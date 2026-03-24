@@ -2,6 +2,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
 from app.core.logging import get_logger
+from app.core.dashscope import dashscope_client
 
 
 class BaseAgent(ABC):
@@ -32,20 +33,64 @@ class BaseAgent(ABC):
         """
         pass
     
-    async def _call_llm(self, prompt: str, system_prompt: Optional[str] = None) -> Dict[str, Any]:
+    async def _call_llm(
+        self, 
+        prompt: str, 
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.7
+    ) -> Dict[str, Any]:
         """
-        调用 LLM
+        调用 LLM (DashScope)
         
-        TODO: 实现实际的 LLM 调用
+        Args:
+            prompt: 用户提示词
+            system_prompt: 系统提示词
+            temperature: 温度参数
+        
+        Returns:
+            {"response": str, "token_used": int}
         """
-        # TODO: 调用 DashScope API
-        # 当前返回 mock 响应
         self.logger.info(f"调用 LLM: {prompt[:50]}...")
         
-        return {
-            "response": f"[Mock] Agent {self.name} 处理了: {prompt[:30]}...",
-            "token_used": 100
-        }
+        try:
+            result = await dashscope_client.simple_chat(
+                prompt=prompt,
+                system_prompt=system_prompt
+            )
+            return result
+        except Exception as e:
+            self.logger.error(f"LLM 调用失败: {str(e)}")
+            raise
+    
+    async def _call_llm_with_messages(
+        self,
+        messages: list,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.7
+    ) -> Dict[str, Any]:
+        """
+        使用消息列表调用 LLM
+        
+        Args:
+            messages: 消息列表 [{"role": "user", "content": "..."}]
+            system_prompt: 系统提示词
+            temperature: 温度参数
+        
+        Returns:
+            {"response": str, "token_used": int}
+        """
+        self.logger.info(f"调用 LLM (多轮对话): {len(messages)} 条消息")
+        
+        try:
+            result = await dashscope_client.chat_completion(
+                messages=messages,
+                system_prompt=system_prompt,
+                temperature=temperature
+            )
+            return result
+        except Exception as e:
+            self.logger.error(f"LLM 调用失败: {str(e)}")
+            raise
     
     def log(self, level: str, message: str, **kwargs):
         """日志记录"""

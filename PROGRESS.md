@@ -1,7 +1,7 @@
 # AI 学习规划师 — 开发进度
 
 ## 当前阶段
-**阶段**: Phase 0 - 初始化
+**阶段**: Phase 0 + AI 集成
 **状态**: ✅ 已完成
 **完成时间**: 2026-03-24
 
@@ -18,6 +18,13 @@
 - [x] 后端基础架构
 - [x] 首个版本提交
 
+### AI 集成 ✅
+- [x] DashScope API 客户端
+- [x] Goal Agent 完整实现
+- [x] Plan Agent 完整实现
+- [x] Feedback Agent 完整实现
+- [x] Agent Router 完善
+
 ### Phase 1 - 后端基础设施 ⏳
 - [ ] 配置管理模块完善
 - [ ] 数据库层（PostgreSQL）
@@ -26,12 +33,11 @@
 - [ ] Token 配额管理
 
 ### Phase 2 - AI 智能体系统 ⏳
-- [ ] Agent 框架完善
-- [ ] Router Agent
-- [ ] Goal Agent
-- [ ] Plan Agent
-- [ ] Feedback Agent
-- [ ] DashScope 集成
+- [x] Agent 框架完善 ✅
+- [x] Goal Agent ✅
+- [x] Plan Agent ✅
+- [x] Feedback Agent ✅
+- [ ] Router Agent 智能路由
 
 ### Phase 3 - 学习计划与打卡 ⏳
 - [ ] 计划生成流程
@@ -60,8 +66,8 @@
 | 版本 | 状态 | 日期 | 说明 |
 |------|------|------|------|
 | v0.1.0-alpha | ✅ | 2026-03-24 | 项目骨架初始化 |
-| v0.2.0-alpha | ⏳ | - | 后端基础设施 |
-| v0.3.0-alpha | ⏳ | - | AI 智能体系统 |
+| v0.2.0-alpha | ✅ | 2026-03-24 | AI Agent + DashScope 集成 |
+| v0.3.0-alpha | ⏳ | - | AI 智能体系统完善 |
 | v0.4.0-alpha | ⏳ | - | 学习计划与打卡 |
 | v0.5.0-alpha | ⏳ | - | 奖励系统 |
 | v0.6.0-alpha | ⏳ | - | 前端开发 |
@@ -74,11 +80,22 @@
 
 ---
 
+## 已集成功能
+
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| DashScope API | ✅ | sk-e17cf... 接入 qwen3.5-flash |
+| Goal Agent | ✅ | 引导用户明确学习目标 |
+| Plan Agent | ✅ | 生成个性化学习计划 |
+| Feedback Agent | ✅ | 评估反馈和鼓励 |
+
+---
+
 ## 下一步行动
 
-1. 继续 Phase 1 - 配置管理模块完善
-2. 等待用户提供 DashScope API Key
-3. 完善数据库层配置
+1. 继续 Phase 1 - 后端基础设施
+2. 开发用户认证 API（真实发送短信）
+3. 开发学习计划创建和任务生成
 
 ---
 
