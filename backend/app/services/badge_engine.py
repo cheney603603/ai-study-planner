@@ -1,6 +1,6 @@
 """徽章引擎"""
-from typing import List, Optional
-from datetime import datetime
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.badge import Badge, UserBadge
@@ -18,12 +18,57 @@ LEVELS = [
     {"name": "宗师", "min_score": 5000, "max_score": 999999}
 ]
 
+# 徽章定义
+BADGE_DEFINITIONS = [
+    {"code": "first_login", "name": "初来乍到", "description": "首次登录", "score": 50},
+    {"code": "first_plan", "name": "计划达人", "description": "创建第一个学习计划", "score": 100},
+    {"code": "first_task", "name": "行动派", "description": "完成第一个学习任务", "score": 50},
+    {"code": "streak_3", "name": "三天打鱼", "description": "连续学习 3 天", "score": 100},
+    {"code": "streak_7", "name": "周冠军", "description": "连续学习 7 天", "score": 200},
+    {"code": "streak_30", "name": "月度之星", "description": "连续学习 30 天", "score": 500},
+    {"code": "tasks_10", "name": "小试牛刀", "description": "完成 10 个任务", "score": 100},
+    {"code": "tasks_50", "name": "熟能生巧", "description": "完成 50 个任务", "score": 300},
+    {"code": "tasks_100", "name": "百炼成钢", "description": "完成 100 个任务", "score": 500},
+    {"code": "level_enter", "name": "入门", "description": "达到入门等级", "score": 50},
+    {"code": "level_advanced", "name": "进阶", "description": "达到进阶等级", "score": 150},
+    {"code": "level_master", "name": "大师", "description": "达到大师等级", "score": 300},
+    {"code": "level_master2", "name": "一代宗师", "description": "达到宗师等级", "score": 500},
+    {"code": "score_500", "name": "积分小将", "description": "累计获得 500 积分", "score": 100},
+    {"code": "score_2000", "name": "学分富户", "description": "累计获得 2000 积分", "score": 200},
+]
+
 
 class BadgeEngine:
-    """徽章引擎"""
+    """徽章引擎 - 处理积分、徽章和等级"""
     
     def __init__(self, db: AsyncSession):
         self.db = db
+        self._badge_cache = {}
+    
+    async def initialize_badges(self):
+        """初始化徽章数据到数据库"""
+        for badge_def in BADGE_DEFINITIONS:
+            # 检查是否已存在
+            stmt = select(Badge).where(Badge.code == badge_def["code"])
+            result = await self.db.execute(stmt)
+            existing = result.scalar_one_or_none()
+            
+            if not existing:
+                badge = Badge(
+                    id=self._generate_id(),
+                    name=badge_def["name"],
+                    code=badge_def["code"],
+                    description=badge_def["description"],
+                    score=badge_def["score"]
+                )
+                self.db.add(badge)
+        
+        await self.db.commit()
+        logger.info("徽章数据初始化完成")
+    
+    def _generate_id(self) -> str:
+        import uuid
+        return str(uuid.uuid4())
     
     def calculate_level(self, score: int) -> str:
         """根据积分计算等级"""
@@ -32,13 +77,12 @@ class BadgeEngine:
                 return level["name"]
         return "入门"
     
-    def check_level_up(self, user: User) -> Optional[dict]:
+    def check_level_up(self, user: User) -> Optional[Dict[str, str]]:
         """检查等级是否提升"""
         old_level = user.level
         new_level = self.calculate_level(user.total_score)
         
         if old_level != new_level:
-            user.level = new_level
             logger.info(f"用户等级提升: {user.id}, {old_level} -> {new_level}")
             return {"old": old_level, "new": new_level}
         
@@ -77,13 +121,13 @@ class BadgeEngine:
                 next_level=next_level_info.get("name") if next_level_info else None,
                 current_score=user.total_score,
                 score_to_next_level=next_level_info.get("min_score") - user.total_score if next_level_info else None,
-                level_progress=next_level_info.get("progress", 0) if next_level_info else 100
+                level_progress=next_level_info.get("progress", 100) if next_level_info else 100
             ),
             earned_badges=earned_badges,
             all_badges=all_badges
         )
     
-    def _get_next_level_info(self, current_level: str, score: int) -> Optional[dict]:
+    def _get_next_level_info(self, current_level: str, score: int) -> Optional[Dict[str, Any]]:
         """获取下一等级信息"""
         current_idx = next((i for i, l in enumerate(LEVELS) if l["name"] == current_level), 0)
         
@@ -91,12 +135,14 @@ class BadgeEngine:
             return None
         
         next_level = LEVELS[current_idx + 1]
-        progress = (score - LEVELS[current_idx]["min_score"]) / (next_level["min_score"] - LEVELS[current_idx]["min_score"])
+        score_in_level = score - LEVELS[current_idx]["min_score"]
+        level_range = next_level["min_score"] - LEVELS[current_idx]["min_score"]
+        progress = (score_in_level / level_range * 100) if level_range > 0 else 100
         
         return {
             "name": next_level["name"],
             "min_score": next_level["min_score"],
-            "progress": min(progress * 100, 100)
+            "progress": min(progress, 100)
         }
     
     async def _get_earned_badges(self, user_id: str) -> List[BadgeResponse]:
@@ -128,6 +174,12 @@ class BadgeEngine:
         result = await self.db.execute(stmt)
         badges = result.scalars().all()
         
+        if not badges:
+            # 初始化徽章
+            await self.initialize_badges()
+            result = await self.db.execute(stmt)
+            badges = result.scalars().all()
+        
         return [
             BadgeResponse(
                 id=b.id,
@@ -140,7 +192,7 @@ class BadgeEngine:
             for b in badges
         ]
     
-    async def get_all_badges_with_status(self, user_id: str) -> dict:
+    async def get_all_badges_with_status(self, user_id: str) -> Dict[str, Any]:
         """获取所有徽章及其获得状态"""
         all_badges = await self._get_all_badges()
         earned = await self._get_earned_badges(user_id)
@@ -161,25 +213,72 @@ class BadgeEngine:
             ]
         }
     
-    async def check_and_award_badges(self, user_id: str) -> List[BadgeResponse]:
+    async def check_and_award_badges(self, user_id: str, context: Dict[str, Any] = None) -> List[BadgeResponse]:
         """
         检查并发放徽章
         
-        TODO: 根据用户行为触发徽章发放
+        Args:
+            user_id: 用户 ID
+            context: 上下文信息，包含：
+                - task_completed: 完成任务数
+                - streak_days: 连续学习天数
+                - total_score: 总积分
         """
-        # TODO: 实现徽章检查逻辑
-        # - FIRST_LOGIN: 首次登录
-        # - FIRST_PLAN: 创建首个计划
-        # - FIRST_TASK: 完成首个任务
-        # - STREAK_7: 连续学习 7 天
-        # - STREAK_30: 连续学习 30 天
-        # - LEVEL_ENTER: 入门
-        # - LEVEL_ADVANCED: 进阶
-        # - LEVEL_MASTER: 大师
+        if context is None:
+            context = {}
         
-        return []
+        new_badges = []
+        
+        # 获取用户已获得的徽章
+        earned = await self._get_earned_badges(user_id)
+        earned_codes = {b.code for b in earned}
+        
+        task_count = context.get("task_completed", 0)
+        streak = context.get("streak_days", 0)
+        total_score = context.get("total_score", 0)
+        
+        # 检查任务相关徽章
+        if task_count >= 1 and "first_task" not in earned_codes:
+            await self._award_badge(user_id, "first_task")
+            new_badges.append("first_task")
+        
+        if task_count >= 10 and "tasks_10" not in earned_codes:
+            await self._award_badge(user_id, "tasks_10")
+            new_badges.append("tasks_10")
+        
+        if task_count >= 50 and "tasks_50" not in earned_codes:
+            await self._award_badge(user_id, "tasks_50")
+            new_badges.append("tasks_50")
+        
+        if task_count >= 100 and "tasks_100" not in earned_codes:
+            await self._award_badge(user_id, "tasks_100")
+            new_badges.append("tasks_100")
+        
+        # 检查连续学习徽章
+        if streak >= 3 and "streak_3" not in earned_codes:
+            await self._award_badge(user_id, "streak_3")
+            new_badges.append("streak_3")
+        
+        if streak >= 7 and "streak_7" not in earned_codes:
+            await self._award_badge(user_id, "streak_7")
+            new_badges.append("streak_7")
+        
+        if streak >= 30 and "streak_30" not in earned_codes:
+            await self._award_badge(user_id, "streak_30")
+            new_badges.append("streak_30")
+        
+        # 检查积分徽章
+        if total_score >= 500 and "score_500" not in earned_codes:
+            await self._award_badge(user_id, "score_500")
+            new_badges.append("score_500")
+        
+        if total_score >= 2000 and "score_2000" not in earned_codes:
+            await self._award_badge(user_id, "score_2000")
+            new_badges.append("score_2000")
+        
+        return new_badges
     
-    async def award_badge(self, user_id: str, badge_code: str) -> bool:
+    async def _award_badge(self, user_id: str, badge_code: str) -> bool:
         """发放徽章"""
         # 获取徽章
         stmt = select(Badge).where(Badge.code == badge_code)
@@ -218,3 +317,7 @@ class BadgeEngine:
         
         logger.info(f"徽章发放成功: user={user_id}, badge={badge_code}")
         return True
+    
+    async def award_badge(self, user_id: str, badge_code: str) -> bool:
+        """手动发放徽章"""
+        return await self._award_badge(user_id, badge_code)
