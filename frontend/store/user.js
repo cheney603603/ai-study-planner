@@ -1,8 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-
-// API 基础地址
-const API_BASE = 'http://localhost:8000/api/v1'
+import { API_BASE } from '../config/env'
 
 export const useStore = defineStore('user', () => {
   // 状态

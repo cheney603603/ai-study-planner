@@ -50,6 +50,7 @@ class ChatSession(Base):
     session_type = Column(String(30), default="goal_discussion")  # goal_discussion/plan_adjust/feedback
     status = Column(String(20), default="active")  # active/closed
     messages = Column(JSON)  # 消息历史
+    context = Column(JSON, default=dict)  # 多轮对话上下文（collected_info 等）
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     

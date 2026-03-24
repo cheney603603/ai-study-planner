@@ -8,27 +8,30 @@ from app.core.logging import get_logger
 
 logger = get_logger("agents.router")
 
+# 确认意图关键词
+_CONFIRM_KEYWORDS = ["确认", "好的", "可以", "开始", "生成", "执行", "没问题", "就这样"]
+
 
 class AgentRouter:
     """Agent 路由 - 根据意图分发到对应 Agent"""
-    
+
     def __init__(self):
         self.router_agent = RouterAgent()
         self.goal_agent = GoalAgent()
         self.plan_agent = PlanAgent()
         self.feedback_agent = FeedbackAgent()
-        
-        # Agent 映射
+
         self.agents = {
             "goal_discussion": self.goal_agent,
             "plan_adjust": self.goal_agent,
             "feedback": self.feedback_agent,
-            "plan_generate": self.plan_agent
+            "plan_generate": self.plan_agent,
         }
-        
-        # 默认 Agent
         self.default_agent = self.goal_agent
-    
+
+    def _is_confirm(self, message: str) -> bool:
+        return any(kw in message for kw in _CONFIRM_KEYWORDS)
+
     async def route(
         self,
         user_id: str,
@@ -36,66 +39,58 @@ class AgentRouter:
         session_id: str,
         session_type: str = "goal_discussion",
         context: Dict[str, Any] = None,
-        history: list = None
+        history: list = None,
     ) -> Dict[str, Any]:
-        """
-        路由消息到对应 Agent
-        
-        1. 解析会话类型和上下文
-        2. 根据上下文判断是否需要生成计划
-        3. 分发到对应 Agent
-        4. 返回 Agent 响应
-        """
+        """路由消息到对应 Agent，统一返回 response 字段"""
         logger.info(f"路由消息: user={user_id}, type={session_type}")
-        
-        # 合并上下文
+
         full_context = context or {}
-        full_context.update({
-            "user_id": user_id,
-            "message": message,
-            "session_id": session_id,
-            "session_type": session_type,
-            "history": history or []
-        })
-        
-        # 检查是否准备生成计划
+        full_context.update(
+            {
+                "user_id": user_id,
+                "message": message,
+                "session_id": session_id,
+                "session_type": session_type,
+                "history": history or [],
+            }
+        )
+
         collected_info = full_context.get("collected_info", {})
-        
-        # 如果收集到足够信息，自动触发计划生成
+
+        # 信息充分 + 用户确认 → 直接生成计划
         if session_type == "goal_discussion":
             required_fields = ["subject", "target", "daily_duration"]
             missing = [f for f in required_fields if not collected_info.get(f)]
-            
-            # 如果没有缺失字段，询问是否生成计划
-            if not missing:
-                # 检查用户是否确认
-                confirm_keywords = ["确认", "好", "可以", "开始", "生成", "执行"]
-                if any(kw in message for kw in confirm_keywords):
-                    full_context["collected_info"] = collected_info
-                    logger.info("触发计划生成 Agent")
-                    return await self.plan_agent.process(full_context)
-        
-        # 根据 session_type 选择 Agent
+            if not missing and self._is_confirm(message):
+                full_context["collected_info"] = collected_info
+                logger.info("触发计划生成 Agent")
+                result = await self.plan_agent.process(full_context)
+                return self._normalize(result)
+
         agent = self.agents.get(session_type, self.default_agent)
-        
         logger.info(f"分发到 Agent: {agent.name}")
-        
-        # 处理请求
+
         try:
             result = await agent.process(full_context)
-            
-            # 如果 Agent 返回准备生成计划，且用户确认了
-            if result.get("metadata", {}).get("ready_for_plan"):
-                confirm_keywords = ["确认", "好", "可以", "开始", "生成"]
-                if any(kw in message for kw in confirm_keywords):
-                    result = await self.plan_agent.process(full_context)
-            
-            return result
-            
+
+            # Agent 标记 ready_for_plan 且用户确认
+            if result.get("metadata", {}).get("ready_for_plan") and self._is_confirm(message):
+                result = await self.plan_agent.process(full_context)
+
+            return self._normalize(result)
+
         except Exception as e:
-            logger.error(f"Agent 处理失败: {str(e)}")
+            logger.error(f"Agent 处理失败: {str(e)}", exc_info=True)
             return {
-                "content": "抱歉，处理你的请求时遇到问题，请稍后重试。",
+                "response": "抱歉，处理你的请求时遇到问题，请稍后重试。",
                 "token_used": 0,
-                "metadata": {}
+                "metadata": {},
             }
+
+    @staticmethod
+    def _normalize(result: Dict[str, Any]) -> Dict[str, Any]:
+        """统一响应字段：确保始终有 response 键"""
+        if "response" not in result:
+            # 兼容旧字段名 content
+            result["response"] = result.pop("content", "")
+        return result

@@ -270,26 +270,45 @@ class PlanService:
         }
     
     async def _calculate_streak(self, user_id: str) -> int:
-        """计算连续学习天数"""
-        # 获取最近完成的任务，按日期分组
+        """
+        计算连续学习天数（真实计算）
+
+        逻辑：从今天往前，找连续有完成任务的日期数。
+        """
         stmt = (
-            select(DailyTask)
+            select(DailyTask.completed_at)
             .join(StudyPlan, DailyTask.plan_id == StudyPlan.id)
             .where(
                 StudyPlan.user_id == user_id,
                 DailyTask.status == "completed",
-                DailyTask.completed_at.isnot(None)
+                DailyTask.completed_at.isnot(None),
             )
             .order_by(DailyTask.completed_at.desc())
         )
         result = await self.db.execute(stmt)
-        tasks = result.scalars().all()
-        
-        if not tasks:
+        completed_ats = result.scalars().all()
+
+        if not completed_ats:
             return 0
-        
-        # 简化：返回1（实际应该计算连续日期）
-        return 1
+
+        # 提取唯一日期集合（UTC 日期）
+        completed_dates = sorted(
+            {dt.date() for dt in completed_ats},
+            reverse=True,
+        )
+
+        today = datetime.utcnow().date()
+        streak = 0
+        expected = today
+
+        for d in completed_dates:
+            if d == expected:
+                streak += 1
+                expected = expected - timedelta(days=1)
+            elif d < expected:
+                break  # 中断，停止计数
+
+        return streak
     
     async def complete_task(
         self,
