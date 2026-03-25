@@ -104,21 +104,38 @@ class PlanAgent(BaseAgent):
 请生成一个平衡的学习计划，包含阶段划分和里程碑。用 JSON 格式返回。"""
     
     def _parse_plan(self, llm_response: str, info: dict) -> dict:
-        """解析 LLM 返回的计划"""
+        """
+        解析 LLM 返回的计划 JSON
+
+        兼容以下格式：
+        1. 纯 JSON
+        2. ```json ... ``` 代码块
+        3. 混有说明文字的 JSON
+        """
+        import re
+
+        # 优先匹配 markdown 代码块
+        code_block = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", llm_response, re.DOTALL)
+        if code_block:
+            json_str = code_block.group(1)
+        else:
+            # 提取最外层 { ... }
+            json_start = llm_response.find("{")
+            json_end = llm_response.rfind("}") + 1
+            if json_start == -1 or json_end <= json_start:
+                self.log("warning", "未找到 JSON 内容，使用默认计划")
+                return self._generate_default_plan(info)
+            json_str = llm_response[json_start:json_end]
+
         try:
-            # 尝试提取 JSON
-            json_start = llm_response.find('{')
-            json_end = llm_response.rfind('}') + 1
-            
-            if json_start != -1 and json_end > json_start:
-                json_str = llm_response[json_start:json_end]
-                plan = json.loads(json_str)
-                return plan
-        except json.JSONDecodeError:
-            self.log("warning", "JSON 解析失败，使用默认格式")
-        
-        # Fallback：生成默认计划
-        return self._generate_default_plan(info)
+            plan = json.loads(json_str)
+            # 基本字段校验
+            if not isinstance(plan.get("phases"), list) or len(plan["phases"]) == 0:
+                raise ValueError("phases 字段缺失或为空")
+            return plan
+        except (json.JSONDecodeError, ValueError) as e:
+            self.log("warning", f"JSON 解析失败: {e}，使用默认计划")
+            return self._generate_default_plan(info)
     
     def _generate_default_plan(self, info: dict) -> dict:
         """生成默认计划（当 LLM 返回格式错误时）"""

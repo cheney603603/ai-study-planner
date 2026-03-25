@@ -68,10 +68,13 @@ class ChatService:
             timestamp=datetime.utcnow(),
         )
 
-        # 更新消息历史
+        # 更新消息历史（最多保留最近 100 条，防止单条记录无限膨胀）
+        MAX_HISTORY = 100
         messages = list(session.messages or [])
         messages.append(user_msg.model_dump(mode="json", exclude_none=True))
         messages.append(ai_msg.model_dump(mode="json", exclude_none=True))
+        if len(messages) > MAX_HISTORY:
+            messages = messages[-MAX_HISTORY:]
 
         # 持久化 collected_info（从 Agent 返回的 metadata 中提取）
         new_collected_info = (

@@ -1,4 +1,5 @@
 """Token 配额管理服务"""
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 from sqlalchemy import select, update
@@ -179,7 +180,3 @@ class TokenManager:
         stmt = select(Subscription).where(Subscription.user_id == user_id)
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
-
-
-# 导入 uuid
-import uuid

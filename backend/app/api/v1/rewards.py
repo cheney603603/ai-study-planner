@@ -63,11 +63,11 @@ async def get_leaderboard(
     for rank, user in enumerate(users, 1):
         leaderboard.append({
             "rank": rank,
-            "user_id": user.id,
-            "nickname": user.nickname,
+            # 不暴露内部 user_id，只展示昵称和头像
+            "nickname": user.nickname or f"用户{user.phone[-4:] if user.phone else '****'}",
             "avatar_url": user.avatar_url,
             "total_score": user.total_score,
-            "level": user.level
+            "level": user.level,
         })
     
     return DataResponse(

@@ -7,6 +7,7 @@ from app.models.user import User
 from app.core.security import verify_token
 from app.services.auth_service import AuthService
 from app.services.token_manager import TokenManager
+from app.config import settings
 from sqlalchemy import select
 
 security = HTTPBearer(auto_error=False)
@@ -17,27 +18,35 @@ async def get_current_user_id(
 ) -> str:
     """
     获取当前用户 ID（从 Token 中）
-    用于不需要强制认证的场景
+
+    - 生产环境：无 Token 直接 401
+    - DEBUG 环境：无 Token 返回 test-user-id（方便本地调试）
     """
     if not credentials:
-        # 开发环境返回测试用户 ID
-        return "test-user-id"
-    
+        if settings.DEBUG:
+            return "test-user-id"
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="未提供认证 Token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     token = credentials.credentials
     payload = verify_token(token)
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="无效或过期的 Token"
+            detail="无效或过期的 Token",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="无效的 Token 载荷"
+            detail="无效的 Token 载荷",
         )
-    
+
     return user_id
 
 

@@ -25,12 +25,14 @@
           <button 
             class="btn-secondary" 
             @click="sendCode"
-            :disabled="countdown > 0"
+            :disabled="countdown > 0 || sendingCode"
           >
-            {{ countdown > 0 ? `${countdown}s` : '获取验证码' }}
+            {{ sendingCode ? '发送中...' : countdown > 0 ? `${countdown}s` : '获取验证码' }}
           </button>
         </view>
-        <button class="btn-primary" @click="login">登录</button>
+        <button class="btn-primary" @click="login" :disabled="loggingIn">
+          {{ loggingIn ? '登录中...' : '登录' }}
+        </button>
       </view>
     </view>
     
@@ -76,8 +78,9 @@
                 v-if="task.status !== 'completed'" 
                 class="btn-small" 
                 @click="completeTask(task.id)"
+                :disabled="loadingTasks"
               >
-                完成
+                {{ loadingTasks ? '...' : '完成' }}
               </button>
               <text v-else class="done-tag">已完成</text>
             </view>
@@ -143,6 +146,9 @@ const store = useStore()
 const phone = ref('')
 const code = ref('')
 const countdown = ref(0)
+const sendingCode = ref(false)   // 发送验证码 loading
+const loggingIn = ref(false)     // 登录 loading
+const loadingTasks = ref(false)  // 任务加载 loading
 
 // 用户信息
 const isLoggedIn = computed(() => store.isLoggedIn)
@@ -150,39 +156,54 @@ const user = computed(() => store.user)
 const todayTasks = computed(() => store.todayTasks)
 const currentPlan = computed(() => store.currentPlan)
 
+// 手机号格式校验（中国大陆）
+const validatePhone = (v) => /^1[3-9]\d{9}$/.test(v)
+
 // 发送验证码
 const sendCode = async () => {
-  if (!phone.value || phone.value.length !== 11) {
-    uni.showToast({ title: '请输入正确手机号', icon: 'none' })
+  if (!validatePhone(phone.value)) {
+    uni.showToast({ title: '请输入正确的 11 位手机号', icon: 'none' })
     return
   }
-  
+  if (sendingCode.value) return
+
+  sendingCode.value = true
   try {
     await store.sendCode(phone.value)
     uni.showToast({ title: '验证码已发送', icon: 'success' })
-    
+
     countdown.value = 60
     const timer = setInterval(() => {
       countdown.value--
       if (countdown.value <= 0) clearInterval(timer)
     }, 1000)
   } catch (e) {
-    uni.showToast({ title: e.message || '发送失败', icon: 'none' })
+    uni.showToast({ title: e.message || '发送失败，请稍后重试', icon: 'none' })
+  } finally {
+    sendingCode.value = false
   }
 }
 
 // 登录
 const login = async () => {
-  if (!phone.value || !code.value) {
-    uni.showToast({ title: '请填写完整', icon: 'none' })
+  if (!validatePhone(phone.value)) {
+    uni.showToast({ title: '请输入正确的手机号', icon: 'none' })
     return
   }
-  
+  if (!code.value || code.value.length !== 6) {
+    uni.showToast({ title: '请输入 6 位验证码', icon: 'none' })
+    return
+  }
+  if (loggingIn.value) return
+
+  loggingIn.value = true
   try {
     await store.login(phone.value, code.value)
     await store.loadUserData()
   } catch (e) {
-    uni.showToast({ title: e.message || '登录失败', icon: 'none' })
+    uni.showToast({ title: e.message || '登录失败，请重试', icon: 'none' })
+  } finally {
+    loggingIn.value = false
   }
 }
 
@@ -193,23 +214,31 @@ const startPlan = () => {
 
 // 完成任务
 const completeTask = async (taskId) => {
+  if (loadingTasks.value) return
+  loadingTasks.value = true
   try {
-    await store.completeTask(taskId)
-    uni.showToast({ title: '任务完成！', icon: 'success' })
+    const result = await store.completeTask(taskId)
+    const msg = result?.level_up
+      ? `任务完成！升级到 ${result.level_up.new} 🎉`
+      : '任务完成！'
+    uni.showToast({ title: msg, icon: 'success', duration: 2000 })
   } catch (e) {
     uni.showToast({ title: e.message || '操作失败', icon: 'none' })
+  } finally {
+    loadingTasks.value = false
   }
 }
 
 onMounted(async () => {
-  // 检查登录状态
   const token = uni.getStorageSync('token')
   if (token) {
     store.setToken(token)
     try {
       await store.loadUserData()
     } catch (e) {
+      // Token 失效，清除登录状态
       store.logout()
+      uni.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
     }
   }
 })

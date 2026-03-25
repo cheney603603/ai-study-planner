@@ -1,4 +1,5 @@
 """订阅服务"""
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional, List
 from sqlalchemy import select, update
@@ -158,7 +159,3 @@ class SubscriptionService:
         
         logger.info(f"订阅续费成功: user={user_id}, plan={subscription.plan_type}")
         return subscription
-
-
-# 导入 uuid
-import uuid

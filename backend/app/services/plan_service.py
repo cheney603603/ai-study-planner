@@ -93,26 +93,57 @@ class PlanService:
                     id=str(uuid.uuid4()),
                     plan_id=plan_id,
                     phase_id=phase_id,
-                    title=self._generate_task_title(phase_data.get("name", ""), day, task_num),
-                    content=self._generate_task_content(phase_data.get("goals", []), task_num),
+                    title=self._generate_task_title(
+                        phase_data.get("name", ""),
+                        day,
+                        task_num,
+                        goals=phase_data.get("goals", []),
+                    ),
+                    content=self._generate_task_content(
+                        phase_data.get("goals", []),
+                        task_num,
+                        phase_name=phase_data.get("name", ""),
+                    ),
                     duration_mins=30,
                     difficulty="medium",
                     status="pending",
                     scheduled_date=scheduled_date,
-                    score=10
+                    score=10,
                 )
                 self.db.add(task)
     
-    def _generate_task_title(self, phase_name: str, day: int, task_num: int) -> str:
-        topics = ["学习新知识点", "实践练习", "复习巩固", "完成小测验", "总结笔记"]
-        topic = topics[task_num % len(topics)]
-        return f"第{day+1}天 - {topic}"
-    
-    def _generate_task_content(self, goals: List[str], task_num: int) -> str:
+    def _generate_task_title(self, phase_name: str, day: int, task_num: int, goals: list = None) -> str:
+        """根据阶段目标生成有意义的任务标题"""
+        # 任务类型轮换：学习 → 练习 → 复习
+        task_types = [
+            ("📖 学习", "理解并掌握"),
+            ("✏️ 练习", "动手实践"),
+            ("🔁 复习", "巩固回顾"),
+        ]
+        task_type_label, task_type_verb = task_types[task_num % len(task_types)]
+
+        # 优先使用阶段目标作为内容
+        if goals and len(goals) > 0:
+            goal = goals[task_num % len(goals)]
+            # 截断过长的目标描述
+            goal_short = goal[:20] if len(goal) > 20 else goal
+            return f"{task_type_label}：{goal_short}"
+
+        # 无目标时用阶段名 + 天数
+        return f"{task_type_label}：{phase_name} 第 {day + 1} 天"
+
+    def _generate_task_content(self, goals: list, task_num: int, phase_name: str = "") -> str:
+        """生成任务详细描述"""
         if not goals:
-            return "完成当日学习任务"
-        goal = goals[task_num % len(goals)] if goals else "完成学习目标"
-        return f"深入学习：{goal}"
+            return f"完成 {phase_name} 阶段的学习任务，认真记录笔记。"
+
+        goal = goals[task_num % len(goals)]
+        task_types = [
+            f"深入学习：{goal}。建议结合教材和在线资源，做好笔记。",
+            f"实践练习：{goal}。尝试独立完成相关练习题或小项目。",
+            f"复习巩固：{goal}。回顾之前学习的内容，查漏补缺。",
+        ]
+        return task_types[task_num % len(task_types)]
     
     async def get_current_plan(self, user_id: str) -> Optional[dict]:
         """获取当前学习计划"""

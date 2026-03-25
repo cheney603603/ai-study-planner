@@ -13,9 +13,19 @@ _CONFIRM_KEYWORDS = ["确认", "好的", "可以", "开始", "生成", "执行",
 
 
 class AgentRouter:
-    """Agent 路由 - 根据意图分发到对应 Agent"""
+    """Agent 路由 - 根据意图分发到对应 Agent（单例，应用启动时初始化一次）"""
+
+    _instance: "AgentRouter | None" = None
+
+    def __new__(cls) -> "AgentRouter":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
 
     def __init__(self):
+        if self._initialized:
+            return
         self.router_agent = RouterAgent()
         self.goal_agent = GoalAgent()
         self.plan_agent = PlanAgent()
@@ -28,6 +38,8 @@ class AgentRouter:
             "plan_generate": self.plan_agent,
         }
         self.default_agent = self.goal_agent
+        self._initialized = True
+        logger.info("AgentRouter 初始化完成（单例）")
 
     def _is_confirm(self, message: str) -> bool:
         return any(kw in message for kw in _CONFIRM_KEYWORDS)
