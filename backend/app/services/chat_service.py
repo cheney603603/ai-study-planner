@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.badge import ChatSession
 from app.schemas.chat import ChatMessage
 from app.core.logging import get_logger
-from app.agents.agent_router import AgentRouter
+from app.agents.agent_router import get_agent_router
 
 logger = get_logger("service.chat")
 
@@ -17,7 +17,7 @@ class ChatService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.agent_router = AgentRouter()
+        self.agent_router = get_agent_router()  # 单例，惰性初始化
 
     async def process_message(
         self,

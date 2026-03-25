@@ -1,6 +1,6 @@
 """计划服务"""
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Optional, List, Dict, Any
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,7 +67,10 @@ class PlanService:
         
         await self.db.commit()
         await self.db.refresh(plan)
-        
+
+        # 发放首次创建计划徽章
+        await self.badge_engine.award_badge(user_id, "first_plan")
+
         logger.info(f"学习计划创建成功: plan_id={plan.id}")
         return plan
     
@@ -322,13 +325,13 @@ class PlanService:
         if not completed_ats:
             return 0
 
-        # 提取唯一日期集合（UTC 日期）
+        # 提取唯一日期集合
         completed_dates = sorted(
             {dt.date() for dt in completed_ats},
             reverse=True,
         )
 
-        today = datetime.utcnow().date()
+        today = date.today()
         streak = 0
         expected = today
 

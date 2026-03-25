@@ -130,19 +130,25 @@ class BadgeEngine:
     def _get_next_level_info(self, current_level: str, score: int) -> Optional[Dict[str, Any]]:
         """获取下一等级信息"""
         current_idx = next((i for i, l in enumerate(LEVELS) if l["name"] == current_level), 0)
-        
+
         if current_idx >= len(LEVELS) - 1:
             return None
-        
+
         next_level = LEVELS[current_idx + 1]
-        score_in_level = score - LEVELS[current_idx]["min_score"]
-        level_range = next_level["min_score"] - LEVELS[current_idx]["min_score"]
-        progress = (score_in_level / level_range * 100) if level_range > 0 else 100
-        
+        current_level_def = LEVELS[current_idx]
+        score_in_level = score - current_level_def["min_score"]
+        level_range = next_level["min_score"] - current_level_def["min_score"]
+
+        # 防御：防止 level_range 为 0（定义错误时）
+        if level_range <= 0:
+            progress = 100.0
+        else:
+            progress = min(score_in_level / level_range * 100, 100.0)
+
         return {
             "name": next_level["name"],
             "min_score": next_level["min_score"],
-            "progress": min(progress, 100)
+            "progress": progress,
         }
     
     async def _get_earned_badges(self, user_id: str) -> List[BadgeResponse]:

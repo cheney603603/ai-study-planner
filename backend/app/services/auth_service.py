@@ -12,6 +12,7 @@ from app.core.security import create_access_token
 from app.core.logging import get_logger
 from app.core.sms import sms_service
 from app.config import settings
+from app.services.badge_engine import BadgeEngine
 
 logger = get_logger("service.auth")
 
@@ -116,6 +117,10 @@ class AuthService:
 
         user = await self._get_or_create_user(phone)
         await self._ensure_subscription(user.id)
+
+        # 发放首次登录徽章
+        badge_engine = BadgeEngine(self.db)
+        await badge_engine.award_badge(user.id, "first_login")
 
         token = create_access_token(
             data={"sub": user.id, "phone": phone},
